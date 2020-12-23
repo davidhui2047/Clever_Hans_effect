@@ -1,0 +1,137 @@
+---
+title: " Whether “Clever Hans” effect affect fitting a logistic regression model to the dataset ex2120"
+author: "Chiu Fan Hui"
+date: "13/10/2020"
+output:
+  word_document: default
+  pdf_document: default
+  html_document:
+    df_print: paged
+---
+Aim: Investigating whether there is evidence for a “Clever Hans” effect for fitting a logistic regression model to the dataset ex2120
+
+Background: Data set ex2120 is used in this project, each of 12 students trained rats to run a maze, the data set contains their number of successful runs out of 50 on each of 5 days, the student’s prior expectation of success (on a scale from -10 to 10), and a variable indicating treatment–whether or not the students were supplied with the fictitious information that their rights were bright.
+
+Let's explore the data first
+```{r message=FALSE, warning=FALSE}
+#KMA253 project 3
+library(Sleuth3)
+library(ggplot2)
+
+#Visualising the data
+p <- ggplot(ex2120, aes(x=Day, y=Success, linetype=as.factor(Student)))
+p + geom_line() + facet_grid(~Treatment)
+```
+In average, the number of successes for bright rats is higher than dull rats. Most of the dull rats had a peak performance on day three.
+```{r message=FALSE, warning=FALSE}
+p <- ggplot(ex2120, aes(x=as.factor(Day), y=Success))
+p + geom_boxplot() + facet_grid(~Treatment)
+```
+The dull rats were doing well on day three, as the box is significantly higher than the rest of the day. The median of bright rats seems increasing, but most of the box is overlapping. Bright rats had a better performance on day five compare to day one and two as the box of day five is significantly higher than day one and two.
+```{r message=FALSE, warning=FALSE}
+#why we don't want to use Student as a variable
+p <- ggplot(ex2120, aes(x=Student, y=PriorExp))
+p + geom_point(colour="red") + theme_classic()
+```
+Each student has a different prior expectation, so the prior expectation will be used for a model, not the student.
+```{r message=FALSE, warning=FALSE}
+#1. Using the week 10 notes
+tapply(ex2120$Success, ex2120$Treatment, sum)
+
+odds_bright = 678/(1500 - 678)
+odds_dull = 440/(1500 - 440)
+or <- odds_bright/odds_dull
+lor <- log(or)
+se.lor <- sqrt(1/(678*822/1500) + 1/(440*1060/1500))
+approx.95CI <- c(lor + qnorm(0.025)*se.lor, lor + qnorm(0.975)*se.lor)
+or
+exp(approx.95CI) 
+```
+ The total number of successes for the bright rats are 678, for the dull rats are 440. 
+ The odds ratio is 1.98706, not equal to one, which mean the odds for bright rats and the odds for dull rats are different.
+ As the exponetial of the confidence interval (1.709177, 2.310123) does not include one, so the odds for bright rats is not equal to the odds for dull rats.
+```{r message=FALSE, warning=FALSE}
+#2. Using fisher.test
+rats <- matrix(c(678, 1500-678, 440, 1500-440), nrow = 2)
+rats
+fisher.test(rats) #p valuse is very low and true odds ratio is not equal to 1 which mean odds for bright not equal odds for dull
+```
+There are 678 bright rats succeed and 822 bright rats failed. There are 440 dull rats succeed and 1060 dull rats failed.
+The p-value is < 2.2e-16 so the null hypothesis can be rejected and the true odds ratio is not equal to 1, which mean the odds for bright rats and the odds for dull rats are different.
+```{r message=FALSE, warning=FALSE}
+#3. via glm
+binResponse <- cbind(ex2120$Success, 50 - ex2120$Success)
+ex2120$Treatment <- factor(ex2120$Treatment, levels=c("dull", "bright"))
+fit <- glm(binResponse ~ Treatment, family = binomial(link=logit), data = ex2120)
+exp(confint(fit)) 
+summary(fit)
+```
+As the exponetial of the confidence interval (1.709177, 2.310123) does not include one, so the odds for bright rats is not equal to the odds for dull rats. Both the Pr(>|z|) are <2e-16, so the null hypothesis can be rejected and the true odds ratio is not equal to 1, which mean the odds for bright rats and the odds for dull rats are different.
+
+```{r message=FALSE, warning=FALSE}
+#construct a model
+fit <- glm(binResponse ~ Treatment + Day + PriorExp, family=binomial(link=logit), data=ex2120)
+summary(fit)
+drop1(fit, test="Chi")
+residual.deviance <- summary(fit)$deviance
+deg.of.freedom <- summary(fit)$df.residual
+#pvalue
+1 - pchisq(residual.deviance,deg.of.freedom)
+#no it doesn't pass
+```
+The AIC is 357.98, and the residual deviance is 96.264  on 56  degrees of freedom.
+The p-value is 0.0006624085, it's highly significant, which means there are a large amount of residual deviance that is not explain in this model. Therefore, this model fail the goodness of fit test.
+
+
+```{r message=FALSE, warning=FALSE}
+#Make Day a factor
+fit.dayfac <- glm(binResponse ~ Treatment + as.factor(Day) + PriorExp, family=binomial(link=logit), data=ex2120)
+summary(fit.dayfac)
+drop1(fit.dayfac, test="Chi")
+#recheck GOF
+residual.deviance <- summary(fit.dayfac)$deviance
+deg.of.freedom <- summary(fit.dayfac)$df.residual
+#pvalue
+1 - pchisq(residual.deviance,deg.of.freedom)
+#better but it still doesn't pass
+```
+The AIC is 353.94, the residual deviance is 86.23  on 53  degrees of freedom and the p-value is 0.00264833.
+
+When the Day is set as a factor, AIC will be lower, residual deviance is less and p-value is better, so the model do a little bit better.
+Interaction are tried in this project but they are not significant
+
+```{r message=FALSE, warning=FALSE}
+#look at the CIs
+exp(confint(fit)) #if not contain 1 then it's highly sinicicant
+#can we plot the predictions of the odel
+priorexp <- seq(-7,10,1)
+day <- seq(1,5,1)
+treat <- c("bright","dull")
+grid <- expand.grid(PriorExp=priorexp, Treatment=treat, Day=day)
+```
+The confidence interval do not include one so they are all significant.
+```{r message=FALSE, warning=FALSE}
+pr<- predict(fit, newdata=grid, type="response")
+
+toPlot <- cbind(grid, pr)
+head(toPlot)
+p <- ggplot(toPlot, aes(x=Day, y=pr, color=as.factor(PriorExp)))
+p + geom_line() + facet_grid(~Treatment)
+```
+The prediction of the proportion of success show they all increase, but dull rats have a lower mean than bright rats
+```{r message=FALSE, warning=FALSE}
+#plot the predictions of he day as factor + interaction w Treatment model
+fit.dayfac2 <- glm(binResponse ~ Treatment + as.factor(Day) + PriorExp + Treatment:as.factor(Day), family=binomial(link=logit), data=ex2120)
+pr<- predict(fit.dayfac2, newdata=grid, type="response")
+toPlot <- cbind(grid, pr)
+head(toPlot)
+p <- ggplot(toPlot, aes(x=Day, y=pr, color=as.factor(PriorExp)))
+p + geom_point() + facet_grid(~Treatment)
+```
+When Day is set as a factor, there is a similar trend as before
+```{r message=FALSE, warning=FALSE}
+# Visualising predictions
+pred.response <- predict(fit, type="response")
+data.frame(prediction=pred.response, status=ex2120$Success/50)
+```
+The prediction are similar to the status, the modle make a good prediction
